@@ -2,4 +2,5 @@ streamlit
 scikit-learn
 PyPDF2
 numpy
+sentence-transformers
 
