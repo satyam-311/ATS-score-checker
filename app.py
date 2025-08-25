@@ -1,92 +1,111 @@
-from dotenv import load_dotenv
 import streamlit as st
-import google.generativeai as genai
-import os
 import PyPDF2
-
-# Load environment variables
-load_dotenv()
-
-# Configure Gemini
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import re
+import numpy as np
+import tempfile
+import os
 
 # Function to extract text from PDF
-def input_pdf_setup(uploaded_file):
+def extract_text_from_pdf(uploaded_file):
     if uploaded_file is not None:
         pdf_reader = PyPDF2.PdfReader(uploaded_file)
         text = ""
         for page in pdf_reader.pages:
-            text += page.extract_text() + "\n"
-        
-        pdf_parts = [
-            {"mime_type": "text/plain", "data": text}
-        ]
-        return pdf_parts
+            if page.extract_text():
+                text += page.extract_text() + "\n"
+        return text
+    return ""
+
+# Function to clean and preprocess text
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r'[^a-zA-Z0-9\s]', '', text)
+    return text
+
+# Function to calculate ATS score using TF-IDF + Cosine Similarity
+def calculate_ats_score(resume_text, jd_text):
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform([resume_text, jd_text])
+    similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+    return round(similarity * 100, 2)
+
+# Function to find missing keywords
+def find_missing_keywords(resume_text, jd_text):
+    jd_words = set(jd_text.split())
+    resume_words = set(resume_text.split())
+    missing = jd_words - resume_words
+    return list(missing)
+
+# Function to create a downloadable report
+def generate_report(score, missing_keywords):
+    report_content = f"ATS Resume Evaluation Report\n\n"
+    report_content += f"ATS Match Score: {score}%\n\n"
+    if missing_keywords:
+        report_content += "Missing Keywords: " + ", ".join(missing_keywords) + "\n\n"
     else:
-        raise FileNotFoundError("No file uploaded")
+        report_content += "Missing Keywords: None\n\n"
 
-# Function to get response from Gemini
-def get_gemini_response(input_text, pdf_content, prompt):
-    model = genai.GenerativeModel("gemini-pro")
-    response = model.generate_content([
-        {"role": "user", "parts": [{"text": input_text}]},
-        {"role": "user", "parts": [pdf_content[0]]},
-        {"role": "user", "parts": [{"text": prompt}]}
-    ])
-    return response.candidates[0].content.parts[0].text
+    if score > 70:
+        report_content += "Strong match! Your resume aligns well with the job description.\n"
+    elif score > 40:
+        report_content += "Moderate match. Consider adding more relevant keywords.\n"
+    else:
+        report_content += "Weak match. Resume needs significant improvement.\n"
 
-# Streamlit App
-st.set_page_config(page_title="ATS Resume Expert")
-st.header("ATS Tracking System")
+    # Save to a temporary file
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".txt")
+    with open(temp_file.name, "w", encoding="utf-8") as f:
+        f.write(report_content)
+    return temp_file.name
 
+# Streamlit UI
+st.set_page_config(page_title="ATS Resume Expert (Local Model)")
+st.header("ATS Tracking System (Without Gemini API)")
+
+# Inputs
 input_text = st.text_area("Job Description: ", key="input")
 uploaded_file = st.file_uploader("Upload your resume (PDF)...", type=["pdf"])
 
 if uploaded_file is not None:
     st.write("✅ PDF Uploaded Successfully")
 
-submit1 = st.button("Tell Me About the Resume")
-submit3 = st.button("Percentage Match")
+submit = st.button("Calculate ATS Score")
 
-# Prompts
-input_prompt1 = """
-You are an experienced Technical Human Resource Manager. 
-Your task is to review the provided resume against the job description. 
-Please share your professional evaluation on whether the candidate's profile aligns with the role. 
-Highlight the strengths and weaknesses of the applicant in relation to the specified job requirements.
-"""
+if submit:
+    if uploaded_file is not None and input_text.strip() != "":
+        resume_text = extract_text_from_pdf(uploaded_file)
+        resume_clean = clean_text(resume_text)
+        jd_clean = clean_text(input_text)
 
-input_prompt3 = """
-You are a skilled ATS (Applicant Tracking System) scanner with a deep understanding of data science and ATS functionality. 
-Your task is to evaluate the resume against the provided job description. 
-Give me the percentage of match if the resume matches the job description. 
-First, the output should come as percentage, then keywords missing, and lastly final thoughts.
-"""
+        score = calculate_ats_score(resume_clean, jd_clean)
+        missing_keywords = find_missing_keywords(resume_clean, jd_clean)
 
-# Handle buttons
-if submit1:
-    if uploaded_file is not None:
-        pdf_content = input_pdf_setup(uploaded_file)
-        response = get_gemini_response(input_prompt1, pdf_content, input_text)
-        st.subheader("The Response is:")
-        st.write(response)
+        st.subheader("Results:")
+        st.write(f"📊 ATS Match Score: **{score}%**")
+        st.write("🔑 Missing Keywords:", ", ".join(missing_keywords) if missing_keywords else "None")
+
+        if score > 70:
+            st.success("✅ Strong match! Your resume aligns well with the job description.")
+        elif score > 40:
+            st.warning("⚠️ Moderate match. Consider adding more relevant keywords.")
+        else:
+            st.error("❌ Weak match. Resume needs significant improvement.")
+
+        # Generate downloadable report
+        report_file = generate_report(score, missing_keywords)
+        with open(report_file, "rb") as f:
+            st.download_button(
+                label="📥 Download ATS Report",
+                data=f,
+                file_name="ATS_Report.txt",
+                mime="text/plain"
+            )
+
+        # Cleanup temp file
+        os.remove(report_file)
+
     else:
-        st.write("⚠️ Please upload the resume")
-
-elif submit3:
-    if uploaded_file is not None:
-        pdf_content = input_pdf_setup(uploaded_file)
-        response = get_gemini_response(input_prompt3, pdf_content, input_text)
-        st.subheader("The Response is:")
-        st.write(response)
-    else:
-        st.write("⚠️ Please upload the resume")
-
-
-   
-
-
-
-
-
+        st.write("⚠️ Please upload resume and enter job description.")
 
