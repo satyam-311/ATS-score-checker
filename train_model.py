@@ -64,9 +64,15 @@ def train_model(dataset_path="resume_job_matching_dataset.csv", model_path="ats_
         lambda x: compute_bert_similarity(x['resume_clean'], x['jd_clean'], sbert_model), axis=1
     )
 
-    # Train-Test Split
+    # -----------------------------
+    # Fix: Train-Test Split with label shift
+    # -----------------------------
     X = df[['tfidf_score', 'bert_score']]
     y = df['match_score']
+
+    # Shift labels to start from 0 (important for XGBoost)
+    y = y - y.min()
+
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     # Train XGBoost
