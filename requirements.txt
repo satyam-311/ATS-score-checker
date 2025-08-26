@@ -1,8 +1,10 @@
-pandas
-numpy
+streamlit
 scikit-learn
-xgboost
+PyPDF2
+numpy
 sentence-transformers
+xgboost
 joblib
+
 
 
