@@ -4,6 +4,8 @@ from sentence_transformers import SentenceTransformer, util
 import re
 from sklearn.metrics.pairwise import cosine_similarity
 from PyPDF2 import PdfReader
+import textstat   # ✅ readability ke liye
+from collections import Counter
 
 # -----------------------------
 # 1. Load Models
@@ -37,6 +39,19 @@ def compute_bert_similarity(resume, jd, model):
     emb2 = model.encode(jd, convert_to_tensor=True)
     return util.cos_sim(emb1, emb2).item()
 
+def compute_keyword_overlap(resume, jd):
+    resume_words = set(resume.split())
+    jd_words = set(jd.split())
+    if len(jd_words) == 0:
+        return 0
+    return len(resume_words & jd_words) / len(jd_words)
+
+def compute_readability(text):
+    try:
+        return textstat.flesch_reading_ease(text)
+    except:
+        return 0
+
 # -----------------------------
 # 4. PDF Text Extraction
 # -----------------------------
@@ -53,7 +68,7 @@ def extract_text_from_pdf(file):
 # 5. Streamlit UI
 # -----------------------------
 st.title("📄 ATS Resume Matcher")
-st.write("Upload a resume (PDF) and enter Job Description to predict final ATS score.")
+st.write("Upload a resume (PDF) and enter Job Description to predict final ATS score with detailed metrics.")
 
 # Resume upload
 uploaded_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
@@ -73,19 +88,32 @@ if st.button("Predict Match Score"):
         resume_clean = clean_text(resume_text)
         jd_clean = clean_text(jd_input)
 
+        # Individual Scores
         tfidf_score = compute_tfidf_similarity(resume_clean, jd_clean, tfidf)
         bert_score = compute_bert_similarity(resume_clean, jd_clean, sbert_model)
+        keyword_score = compute_keyword_overlap(resume_clean, jd_clean)
+        readability_score = compute_readability(resume_text)
+
         match_score = xgb_model.predict([[tfidf_score, bert_score]])[0]
 
-        # Final ATS Score calculation (average of similarities + XGBoost class)
+        # Final ATS Score calculation
         tfidf_norm = tfidf_score
         bert_norm = bert_score
         sim_score = (0.4*tfidf_norm + 0.6*bert_norm) * 100
         xgb_score = ((match_score + 1)/5) * 100
         final_ats_score = round((sim_score + xgb_score)/2, 2)
 
+        # -----------------------------
+        # Display Results
+        # -----------------------------
         st.success(f"✅ Final ATS Score: {final_ats_score}/100")
-        st.write(f"(TF-IDF: {tfidf_score:.3f}, BERT: {bert_score:.3f}, XGBoost class: {match_score})")
+
+        st.subheader("📊 Detailed Scores")
+        st.write(f"- TF-IDF Similarity: **{tfidf_score:.3f}**")
+        st.write(f"- Semantic (BERT) Similarity: **{bert_score:.3f}**")
+        st.write(f"- Keyword Match Score: **{keyword_score*100:.2f}%**")
+        st.write(f"- Resume Readability (Flesch Score): **{readability_score:.2f}**")
+        st.write(f"- XGBoost Predicted Class: {match_score}")
 
         # -----------------------------
         # 6. Create downloadable report
@@ -104,6 +132,8 @@ Job Description:
 Similarity Scores:
 TF-IDF: {tfidf_score:.3f}
 BERT: {bert_score:.3f}
+Keyword Match: {keyword_score*100:.2f}%
+Readability: {readability_score:.2f}
 
 XGBoost Predicted Class: {match_score}
 """
@@ -115,3 +145,4 @@ XGBoost Predicted Class: {match_score}
             file_name="ats_report.txt",
             mime="text/plain"
         )
+
