@@ -4,8 +4,7 @@ from sentence_transformers import SentenceTransformer, util
 import re
 from sklearn.metrics.pairwise import cosine_similarity
 from PyPDF2 import PdfReader
-import textstat   # ✅ readability ke liye
-from collections import Counter
+import textstat
 
 # -----------------------------
 # 1. Load Models
@@ -49,13 +48,10 @@ def compute_keyword_overlap(resume, jd):
 def compute_readability(text):
     try:
         score = textstat.flesch_reading_ease(text)
-        return max(0, min(100, score))  # ✅ normalize between 0 and 100
+        return max(0, min(100, score))
     except:
         return 0
 
-# -----------------------------
-# Readability label helper
-# -----------------------------
 def readability_label(score):
     if score >= 90:
         return "🟢 Very Easy"
@@ -63,10 +59,8 @@ def readability_label(score):
         return "🟢 Easy to Read"
     elif score >= 30:
         return "🟡 Fairly Difficult"
-    elif score >= 0:
-        return "🟠 Difficult"
     else:
-        return "🔴 Very Confusing"
+        return "🟠 Difficult"
 
 # -----------------------------
 # 4. PDF Text Extraction
@@ -86,17 +80,14 @@ def extract_text_from_pdf(file):
 st.title("📄 ATS Resume Matcher")
 st.write("Upload a resume (PDF) and enter Job Description to predict final ATS score with detailed metrics.")
 
-# Resume upload
 uploaded_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
 resume_text = ""
 if uploaded_file is not None:
     resume_text = extract_text_from_pdf(uploaded_file)
     st.text_area("Resume Text Preview", resume_text, height=200)
 
-# Job Description input
 jd_input = st.text_area("Job Description")
 
-# Prediction
 if st.button("Predict Match Score"):
     if resume_text.strip() == "" or jd_input.strip() == "":
         st.warning("Please upload Resume and enter Job Description.")
@@ -104,7 +95,9 @@ if st.button("Predict Match Score"):
         resume_clean = clean_text(resume_text)
         jd_clean = clean_text(jd_input)
 
-        # Individual Scores
+        # -----------------------------
+        # Calculate all metrics
+        # -----------------------------
         tfidf_score = compute_tfidf_similarity(resume_clean, jd_clean, tfidf)
         bert_score = compute_bert_similarity(resume_clean, jd_clean, sbert_model)
         keyword_score = compute_keyword_overlap(resume_clean, jd_clean)
@@ -114,33 +107,29 @@ if st.button("Predict Match Score"):
         match_score = xgb_model.predict([[tfidf_score, bert_score]])[0]
 
         # Final ATS Score calculation
-        tfidf_norm = tfidf_score
-        bert_norm = bert_score
-        sim_score = (0.4*tfidf_norm + 0.6*bert_norm) * 100
+        sim_score = (0.4*tfidf_score + 0.6*bert_score) * 100
         xgb_score = ((match_score + 1)/5) * 100
         final_ats_score = round((sim_score + xgb_score)/2, 2)
 
         # -----------------------------
-        # Display Results (Improved)
+        # Display Metrics neatly
         # -----------------------------
         st.success(f"✅ Final ATS Score: {final_ats_score}/100")
-
-        st.subheader("📊 Detailed Scores")
 
         class_labels = {1: "Poor Match", 2: "Moderate Match", 3: "Good Match", 4: "Excellent Match"}
 
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("TF-IDF Similarity", f"{tfidf_score:.2f}", help="How well your resume matches the JD based on keyword frequency")
-            st.metric("Keyword Match", f"{keyword_score*100:.2f}%", help="Percentage of JD keywords found in your resume")
+            st.metric("TF-IDF Similarity", f"{tfidf_score:.2f}", help="Keyword-based similarity")
+            st.metric("Keyword Match", f"{keyword_score*100:.2f}%", help="JD keywords found")
         with col2:
-            st.metric("Semantic (BERT) Similarity", f"{bert_score:.2f}", help="Contextual similarity between your resume and JD")
+            st.metric("Semantic (BERT) Similarity", f"{bert_score:.2f}", help="Contextual similarity")
             st.metric("Resume Readability", f"{readability_score:.2f}", readable_label)
 
         st.info(f"📌 ATS Prediction: **{class_labels.get(match_score, 'Unknown')}**")
 
         # -----------------------------
-        # Create downloadable report
+        # Downloadable report
         # -----------------------------
         report_content = f"""
 ATS Resume Matching Report
@@ -162,7 +151,6 @@ Readability: {readability_score:.2f} ({readable_label})
 
 XGBoost Predicted Class: {class_labels.get(match_score, 'Unknown')}
 """
-
         report_bytes = report_content.encode('utf-8')
         st.download_button(
             label="📥 Download ATS Report",
