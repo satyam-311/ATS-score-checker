@@ -48,9 +48,25 @@ def compute_keyword_overlap(resume, jd):
 
 def compute_readability(text):
     try:
-        return textstat.flesch_reading_ease(text)
+        score = textstat.flesch_reading_ease(text)
+        return max(0, min(100, score))  # ✅ normalize between 0 and 100
     except:
         return 0
+
+# -----------------------------
+# Readability label helper
+# -----------------------------
+def readability_label(score):
+    if score >= 90:
+        return "🟢 Very Easy"
+    elif score >= 60:
+        return "🟢 Easy to Read"
+    elif score >= 30:
+        return "🟡 Fairly Difficult"
+    elif score >= 0:
+        return "🟠 Difficult"
+    else:
+        return "🔴 Very Confusing"
 
 # -----------------------------
 # 4. PDF Text Extraction
@@ -93,6 +109,7 @@ if st.button("Predict Match Score"):
         bert_score = compute_bert_similarity(resume_clean, jd_clean, sbert_model)
         keyword_score = compute_keyword_overlap(resume_clean, jd_clean)
         readability_score = compute_readability(resume_text)
+        readable_label = readability_label(readability_score)
 
         match_score = xgb_model.predict([[tfidf_score, bert_score]])[0]
 
@@ -104,23 +121,31 @@ if st.button("Predict Match Score"):
         final_ats_score = round((sim_score + xgb_score)/2, 2)
 
         # -----------------------------
-        # Display Results
+        # Display Results (Improved)
         # -----------------------------
         st.success(f"✅ Final ATS Score: {final_ats_score}/100")
 
         st.subheader("📊 Detailed Scores")
-        st.write(f"- TF-IDF Similarity: **{tfidf_score:.3f}**")
-        st.write(f"- Semantic (BERT) Similarity: **{bert_score:.3f}**")
-        st.write(f"- Keyword Match Score: **{keyword_score*100:.2f}%**")
-        st.write(f"- Resume Readability (Flesch Score): **{readability_score:.2f}**")
-        st.write(f"- XGBoost Predicted Class: {match_score}")
+
+        class_labels = {1: "Poor Match", 2: "Moderate Match", 3: "Good Match", 4: "Excellent Match"}
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("TF-IDF Similarity", f"{tfidf_score:.2f}", help="How well your resume matches the JD based on keyword frequency")
+            st.metric("Keyword Match", f"{keyword_score*100:.2f}%", help="Percentage of JD keywords found in your resume")
+        with col2:
+            st.metric("Semantic (BERT) Similarity", f"{bert_score:.2f}", help="Contextual similarity between your resume and JD")
+            st.metric("Resume Readability", f"{readability_score:.2f}", readable_label)
+
+        st.info(f"📌 ATS Prediction: **{class_labels.get(match_score, 'Unknown')}**")
 
         # -----------------------------
-        # 6. Create downloadable report
+        # Create downloadable report
         # -----------------------------
         report_content = f"""
 ATS Resume Matching Report
 ---------------------------
+
 Final ATS Score: {final_ats_score}/100
 
 Resume (Preview):
@@ -133,9 +158,9 @@ Similarity Scores:
 TF-IDF: {tfidf_score:.3f}
 BERT: {bert_score:.3f}
 Keyword Match: {keyword_score*100:.2f}%
-Readability: {readability_score:.2f}
+Readability: {readability_score:.2f} ({readable_label})
 
-XGBoost Predicted Class: {match_score}
+XGBoost Predicted Class: {class_labels.get(match_score, 'Unknown')}
 """
 
         report_bytes = report_content.encode('utf-8')
@@ -145,4 +170,3 @@ XGBoost Predicted Class: {match_score}
             file_name="ats_report.txt",
             mime="text/plain"
         )
-
