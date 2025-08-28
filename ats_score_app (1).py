@@ -48,19 +48,18 @@ def compute_keyword_overlap(resume, jd):
 def compute_readability(text):
     try:
         score = textstat.flesch_reading_ease(text)
-        return max(0, min(100, score))
+        return score  # raw score rakh lo, label ke liye use hoga
     except:
         return 0
 
 def readability_label(score):
-    if score >= 90:
-        return "🟢 Very Easy"
-    elif score >= 60:
-        return "🟢 Easy to Read"
+    if score >= 60:
+        return "🟢 Easy"
     elif score >= 30:
-        return "🟡 Fairly Difficult"
+        return "🟠 Moderate"
     else:
-        return "🟠 Difficult"
+        return "🔴 Difficult"
+
 
 # -----------------------------
 # 4. PDF Text Extraction
