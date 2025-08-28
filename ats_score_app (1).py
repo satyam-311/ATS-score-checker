@@ -123,7 +123,7 @@ if st.button("Predict Match Score"):
             st.metric("Keyword Match", f"{keyword_score*100:.2f}%", help="JD keywords found")
         with col2:
             st.metric("Semantic (BERT) Similarity", f"{bert_score:.2f}", help="Contextual similarity")
-            st.metric("Resume Readability", f"{readability_score:.2f}", readable_label)
+            st.metric("Resume Readability", readable_label)
 
         st.info(f"📌 ATS Prediction: **{class_labels.get(match_score, 'Unknown')}**")
 
