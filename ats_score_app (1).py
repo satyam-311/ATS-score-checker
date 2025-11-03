@@ -52,13 +52,16 @@ def compute_readability(text):
     except:
         return 0
 
+# -----------------------------
+# *** UPDATED FUNCTION HERE ***
+# -----------------------------
 def readability_label(score):
-    if score >= 60:
-        return "🟢 Easy"
-    elif score >= 30:
-        return "🟠 Moderate"
+    if score >= 50:
+        return "🟢 Simple"  # Easy to read, like general prose
+    elif score >= 25:
+        return "🟠 Standard" # Typical for business/professional docs
     else:
-        return "🔴 Difficult"
+        return "🔴 Technical" # Common for academic or technical docs
 
 
 # -----------------------------
