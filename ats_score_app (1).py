@@ -5,6 +5,39 @@ import re
 from sklearn.metrics.pairwise import cosine_similarity
 from PyPDF2 import PdfReader
 import textstat
+import plotly.graph_objects as go
+
+# -----------------------------
+# 0. Page Configuration (Must be first)
+# -----------------------------
+st.set_page_config(
+    page_title="ATS Resume Matcher",
+    page_icon="📄",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for UI enhancements
+st.markdown("""
+<style>
+    .main {
+        background-color: #f8f9fa;
+    }
+    .stButton>button {
+        width: 100%;
+        border-radius: 5px;
+        height: 3em;
+        font-weight: bold; 
+    }
+    .metric-card {
+        background-color: #ffffff;
+        border: 1px solid #e6e6e6;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # -----------------------------
 # 1. Load Models
@@ -16,7 +49,9 @@ def load_models():
     sbert_model = SentenceTransformer('all-MiniLM-L6-v2')
     return xgb_model, tfidf, sbert_model
 
-xgb_model, tfidf, sbert_model = load_models()
+# Load models with a spinner for better UX
+with st.spinner("Loading AI Models..."):
+    xgb_model, tfidf, sbert_model = load_models()
 
 # -----------------------------
 # 2. Text Preprocessing
@@ -48,21 +83,17 @@ def compute_keyword_overlap(resume, jd):
 def compute_readability(text):
     try:
         score = textstat.flesch_reading_ease(text)
-        return score  # raw score rakh lo, label ke liye use hoga
+        return score
     except:
         return 0
 
-# -----------------------------
-# *** UPDATED FUNCTION HERE ***
-# -----------------------------
 def readability_label(score):
     if score >= 50:
-        return "🟢 Simple"  # Easy to read, like general prose
+        return "🟢 Simple"
     elif score >= 25:
-        return "🟠 Standard" # Typical for business/professional docs
+        return "🟠 Standard"
     else:
-        return "🔴 Technical" # Common for academic or technical docs
-
+        return "🔴 Technical"
 
 # -----------------------------
 # 4. PDF Text Extraction
@@ -77,86 +108,146 @@ def extract_text_from_pdf(file):
     return text.strip()
 
 # -----------------------------
-# 5. Streamlit UI
+# 5. Helper: Gauge Chart
 # -----------------------------
-st.title("📄 ATS Resume Matcher")
-st.write("Upload a resume (PDF) and enter Job Description to predict final ATS score with detailed metrics.")
+def create_gauge_chart(score):
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = score,
+        domain = {'x': [0, 1], 'y': [0, 1]},
+        title = {'text': "ATS Fit Score"},
+        gauge = {
+            'axis': {'range': [0, 100]},
+            'bar': {'color': "#2E86C1"},
+            'steps': [
+                {'range': [0, 40], 'color': "#ffcccb"},
+                {'range': [40, 70], 'color': "#fff4cc"},
+                {'range': [70, 100], 'color': "#d4edda"}],
+        }
+    ))
+    fig.update_layout(height=250, margin={'t': 20, 'b': 20, 'l': 20, 'r': 20})
+    return fig
 
-uploaded_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
+# -----------------------------
+# 6. Streamlit UI
+# -----------------------------
+
+# Sidebar for Instructions
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2910/2910791.png", width=100)
+    st.title("ATS Scanner")
+    st.markdown("### How to use:")
+    st.markdown("1. Upload your Resume (PDF).")
+    st.markdown("2. Paste the Job Description.")
+    st.markdown("3. Click **Predict Match**.")
+    st.markdown("---")
+    st.info("💡 **Pro Tip:** Ensure your resume is text-selectable, not an image scan.")
+
+# Main Header
+st.title("📄 Smart Resume Matcher")
+st.markdown("Optimize your resume for Applicant Tracking Systems (ATS) with AI-powered analysis.")
+st.divider()
+
+# Input Section (Columns)
+col_input1, col_input2 = st.columns(2)
+
 resume_text = ""
-if uploaded_file is not None:
-    resume_text = extract_text_from_pdf(uploaded_file)
-    st.text_area("Resume Text Preview", resume_text, height=200)
+uploaded_file = None
 
-jd_input = st.text_area("Job Description")
+with col_input1:
+    st.subheader("1️⃣ Upload Resume")
+    uploaded_file = st.file_uploader("Upload PDF", type=["pdf"], label_visibility="collapsed")
+    if uploaded_file is not None:
+        resume_text = extract_text_from_pdf(uploaded_file)
+        with st.expander("👁️ View Extracted Resume Text"):
+            st.text_area("", resume_text, height=150)
+        st.success("PDF Loaded Successfully")
 
-if st.button("Predict Match Score"):
+with col_input2:
+    st.subheader("2️⃣ Job Description")
+    jd_input = st.text_area("Paste JD here...", height=200)
+
+# Predict Button centered
+st.write("")
+if st.button("🚀 Predict Match Score", type="primary"):
     if resume_text.strip() == "" or jd_input.strip() == "":
-        st.warning("Please upload Resume and enter Job Description.")
+        st.error("⚠️ Please upload a Resume and enter a Job Description first.")
     else:
-        resume_clean = clean_text(resume_text)
-        jd_clean = clean_text(jd_input)
+        with st.spinner('Analyzing keywords, semantics, and readability...'):
+            resume_clean = clean_text(resume_text)
+            jd_clean = clean_text(jd_input)
+
+            # Calculation
+            tfidf_score = compute_tfidf_similarity(resume_clean, jd_clean, tfidf)
+            bert_score = compute_bert_similarity(resume_clean, jd_clean, sbert_model)
+            keyword_score = compute_keyword_overlap(resume_clean, jd_clean)
+            readability_score = compute_readability(resume_text)
+            readable_label_text = readability_label(readability_score)
+
+            match_score = xgb_model.predict([[tfidf_score, bert_score]])[0]
+
+            # Final Score Logic
+            sim_score = (0.4*tfidf_score + 0.6*bert_score) * 100
+            xgb_score = ((match_score + 1)/5) * 100
+            final_ats_score = round((sim_score + xgb_score)/2, 2)
 
         # -----------------------------
-        # Calculate all metrics
+        # Results Dashboard
         # -----------------------------
-        tfidf_score = compute_tfidf_similarity(resume_clean, jd_clean, tfidf)
-        bert_score = compute_bert_similarity(resume_clean, jd_clean, sbert_model)
-        keyword_score = compute_keyword_overlap(resume_clean, jd_clean)
-        readability_score = compute_readability(resume_text)
-        readable_label = readability_label(readability_score)
+        st.divider()
+        st.subheader("📊 Analysis Results")
 
-        match_score = xgb_model.predict([[tfidf_score, bert_score]])[0]
+        # Top Row: Gauge and Prediction
+        res_col1, res_col2 = st.columns([1, 2])
+        
+        with res_col1:
+            st.plotly_chart(create_gauge_chart(final_ats_score), use_container_width=True)
 
-        # Final ATS Score calculation
-        sim_score = (0.4*tfidf_score + 0.6*bert_score) * 100
-        xgb_score = ((match_score + 1)/5) * 100
-        final_ats_score = round((sim_score + xgb_score)/2, 2)
+        with res_col2:
+            st.markdown("### Model Prediction")
+            class_labels = {1: "Poor Match 😞", 2: "Moderate Match 😐", 3: "Good Match 🙂", 4: "Excellent Match 🚀"}
+            prediction = class_labels.get(match_score, 'Unknown')
+            
+            # Colored Callout based on score
+            if match_score >= 3:
+                st.success(f"**Verdict:** {prediction}")
+            else:
+                st.warning(f"**Verdict:** {prediction}")
+                
+            st.markdown("---")
+            st.markdown(f"**Readability Score:** {readability_score:.1f} ({readable_label_text})")
+            st.caption("A higher readability score means the resume is easier to read.")
+
+        # Second Row: Detailed Metrics
+        st.subheader("🔍 Detailed Metrics")
+        m_col1, m_col2, m_col3 = st.columns(3)
+
+        with m_col1:
+            st.metric("TF-IDF Match", f"{tfidf_score:.2f}", delta="Keyword Frequency")
+        with m_col2:
+            st.metric("BERT Semantic", f"{bert_score:.2f}", delta="Contextual Meaning")
+        with m_col3:
+            st.metric("Keyword Overlap", f"{keyword_score*100:.1f}%", delta="Direct Match")
 
         # -----------------------------
-        # Display Metrics neatly
-        # -----------------------------
-        st.success(f"✅ Final ATS Score: {final_ats_score}/100")
-
-        class_labels = {1: "Poor Match", 2: "Moderate Match", 3: "Good Match", 4: "Excellent Match"}
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("TF-IDF Similarity", f"{tfidf_score:.2f}", help="Keyword-based similarity")
-            st.metric("Keyword Match", f"{keyword_score*100:.2f}%", help="JD keywords found")
-        with col2:
-            st.metric("Semantic (BERT) Similarity", f"{bert_score:.2f}", help="Contextual similarity")
-            st.metric("Resume Readability", readable_label)
-
-        st.info(f"📌 ATS Prediction: **{class_labels.get(match_score, 'Unknown')}**")
-
-        # -----------------------------
-        # Downloadable report
+        # Download Section
         # -----------------------------
         report_content = f"""
-ATS Resume Matching Report
----------------------------
+        ATS Resume Matching Report
+        ---------------------------
+        Final ATS Score: {final_ats_score}/100
+        Verdict: {prediction}
 
-Final ATS Score: {final_ats_score}/100
-
-Resume (Preview):
-{resume_text[:1000]}...
-
-Job Description:
-{jd_input[:1000]}...
-
-Similarity Scores:
-TF-IDF: {tfidf_score:.3f}
-BERT: {bert_score:.3f}
-Keyword Match: {keyword_score*100:.2f}%
-Readability: {readability_score:.2f} ({readable_label})
-
-XGBoost Predicted Class: {class_labels.get(match_score, 'Unknown')}
-"""
-        report_bytes = report_content.encode('utf-8')
+        -- Scores --
+        TF-IDF Similarity: {tfidf_score:.3f}
+        BERT Similarity: {bert_score:.3f}
+        Keyword Overlap: {keyword_score*100:.2f}%
+        Readability: {readability_score:.2f} ({readable_label_text})
+        """
+        
         st.download_button(
-            label="📥 Download ATS Report",
-            data=report_bytes,
+            label="📥 Download Full Report",
+            data=report_content,
             file_name="ats_report.txt",
             mime="text/plain"
         )
